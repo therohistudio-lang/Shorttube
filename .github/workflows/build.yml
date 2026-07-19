@@ -1,0 +1,127 @@
+name: Build ShortTube APK
+
+# Runs automatically whenever you push/upload changes to the main branch,
+# and can also be triggered manually from the Actions tab (the "Run workflow"
+# button) any time you just want a fresh APK without changing anything.
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  APP_ID: com.shorttube.app
+  APP_NAME: ShortTube
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out your repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up Java (needed to build Android apps)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up the Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Capacitor
+        run: |
+          if [ ! -f package.json ]; then npm init -y; fi
+          npm install @capacitor/core @capacitor/android
+
+      # ---- Folder structure created automatically here ----
+      - name: Copy your web files into the www/ folder Capacitor expects
+        run: |
+          mkdir -p www
+          cp -r web-src/* www/
+
+      - name: Create the Capacitor project (only happens the very first run)
+        run: |
+          if [ ! -f capacitor.config.json ] && [ ! -f capacitor.config.ts ]; then
+            npx cap init "$APP_NAME" "$APP_ID" --web-dir=www
+          fi
+
+      - name: Add the Android platform (only happens the very first run)
+        run: |
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+
+      - name: Sync your web files into the native Android project
+        run: npx cap sync android
+
+      - name: Work out your app's package name/folder
+        id: pkg
+        run: |
+          APP_ID_ACTUAL=$(node -e "console.log(require('./capacitor.config.json').appId)")
+          echo "app_id=$APP_ID_ACTUAL" >> "$GITHUB_OUTPUT"
+          echo "pkg_path=$(echo "$APP_ID_ACTUAL" | tr '.' '/')" >> "$GITHUB_OUTPUT"
+
+      # ---- UnityBannerPlugin.java moved to its correct location automatically ----
+      - name: Install the Unity Banner native plugin
+        run: |
+          TARGET_DIR="android/app/src/main/java/${{ steps.pkg.outputs.pkg_path }}"
+          mkdir -p "$TARGET_DIR"
+          cp native-plugins/UnityBannerPlugin.java "$TARGET_DIR/UnityBannerPlugin.java"
+          # Make sure the "package ...;" line inside the file matches this
+          # project's real package name, in case it's still the placeholder.
+          sed -i "s/^package .*;/package ${{ steps.pkg.outputs.app_id }};/" "$TARGET_DIR/UnityBannerPlugin.java"
+
+      # ---- Code registration (the "linking" step) done automatically here ----
+      - name: Register the plugin in MainActivity.java automatically
+        run: |
+          MAIN_ACTIVITY="android/app/src/main/java/${{ steps.pkg.outputs.pkg_path }}/MainActivity.java"
+          python3 - "$MAIN_ACTIVITY" << 'PYEOF'
+          import sys, re
+          path = sys.argv[1]
+          src = open(path).read()
+          if 'registerPlugin(UnityBannerPlugin.class)' not in src:
+              inject = (
+                  "\n  @Override\n"
+                  "  public void onCreate(android.os.Bundle savedInstanceState) {\n"
+                  "    registerPlugin(UnityBannerPlugin.class);\n"
+                  "    super.onCreate(savedInstanceState);\n"
+                  "  }\n"
+              )
+              last_brace = src.rfind('}')
+              if last_brace == -1:
+                  raise SystemExit("MainActivity.java has no closing brace — can't auto-register, this file was likely hand-edited. Stopping so nothing gets corrupted.")
+              src = src[:last_brace] + inject + src[last_brace:]
+              open(path, 'w').write(src)
+              print("Registered UnityBannerPlugin in MainActivity.java")
+          else:
+              print("Already registered — nothing to do")
+          PYEOF
+        # NOTE: this assumes a stock, never-manually-edited MainActivity.java
+        # (true for a fresh `npx cap add android`). If you've since hand-edited
+        # that file and it already has its own onCreate() override, this step
+        # will produce a duplicate-method build error — see the note at the
+        # end of this message for what that looks like and how to fix it.
+
+      - name: Make sure the Unity Ads SDK dependency is present
+        run: |
+          GRADLE_FILE="android/app/build.gradle"
+          if ! grep -q "com.unity3d.ads:unity-ads" "$GRADLE_FILE"; then
+            sed -i "/dependencies {/a\\    implementation 'com.unity3d.ads:unity-ads:4.12.+'" "$GRADLE_FILE"
+          fi
+
+      - name: Build the APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload the APK so you can download it
+        uses: actions/upload-artifact@v4
+        with:
+          name: shorttube-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
