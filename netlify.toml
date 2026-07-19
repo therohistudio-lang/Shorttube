@@ -1,0 +1,16 @@
+# No [build] section needed — this is a flat static site with no build
+# step, and index.html/css/js/assets already sit at the repo root, so
+# there's nothing for Netlify to "initialize" a build for.
+
+# Never let these two files get cached — they control PWA install/update
+# behavior, and a stale cached copy can delay users picking up new
+# versions of the app.
+[[headers]]
+  for = "/service-worker.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Cache-Control = "no-cache"

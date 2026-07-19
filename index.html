@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>ShortTube</title>
+
+<!-- PWA: installable app manifest + theme color for the OS chrome/status bar -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#FFFFFF">
+
+<!-- "App-like" full-screen/standalone behavior on Android/Chrome -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="ShortTube">
+
+<!-- Same, for iOS Safari "Add to Home Screen" (iOS ignores manifest.json for this) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ShortTube">
+<link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="icon" href="assets/logo.png">
+<!-- Speed: warm up connections ahead of time so requests negotiate (DNS +
+     TLS) before they're actually needed — meaningful savings on 2G/3G
+     where that handshake alone can cost several hundred ms. -->
+<link rel="preconnect" href="https://www.youtube.com">
+<link rel="dns-prefetch" href="https://www.youtube.com">
+<link rel="preconnect" href="https://fra.cloud.appwrite.io" crossorigin>
+<link rel="dns-prefetch" href="https://fra.cloud.appwrite.io">
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+
+
+<div id="splash">
+  <img class="splash-bg-logo" src="assets/splash.png" alt="ShortTube">
+  <div class="splash-overlay"></div>
+</div>
+
+<header class="app-header">
+  <div class="brand-frame">
+    <div class="brand-logo-wrap"><img src="assets/logo.png" alt="ShortTube logo"></div>
+    <div class="brand-text">
+      <span class="brand-name">Short<span class="accent">Tube</span></span>
+      <span class="vip-badge"><i class="bi bi-gem"></i>VIP</span>
+    </div>
+  </div>
+  <button class="search-pill" id="openSearchBtn"><i class="bi bi-search"></i><span id="searchPillLabel">Search</span></button>
+</header>
+
+<!-- Reserved slot for the Unity Ads banner (Banner_Android). Fixed just
+     below the header so it stays visible without covering the logo/search
+     bar or the feed content. Hidden (0 height) until an ad actually loads —
+     see ShortTubeUnityAds.showBanner()/hideBanner() in js/ads-unity.js,
+     which also push the feed content down/up to match so nothing sits
+     underneath it unreachable. -->
+<div id="unityBannerSlot"></div>
+
+<!-- DEDICATED SEARCH PAGE: opens on tap, autofocuses the keyboard, includes voice search -->
+<div id="searchOverlay" class="static-overlay">
+  <div class="static-topbar">
+    <button class="static-close" id="closeSearchOverlay"><i class="bi bi-arrow-left"></i></button>
+    <div class="search-input-wrap">
+      <input type="text" id="searchOverlayInput" placeholder="Search videos..." autocomplete="off" enterkeyhint="search">
+      <button id="voiceSearchBtn" title="Voice search"><i class="bi bi-mic-fill"></i></button>
+    </div>
+  </div>
+  <div id="searchOverlayResults"></div>
+</div>
+
+<main id="imagesPage" class="page active">
+  <div class="ptr-indicator" id="imagesPtrIndicator"><i class="bi bi-arrow-repeat"></i></div>
+  <div id="imagesFeed"></div>
+  <div id="imagesLoadMoreSpinner" class="st-loader-row"><div class="st-loader"></div><span>Loading more photos...</span></div>
+</main>
+
+<main id="homePage" class="page">
+  <div class="ptr-indicator" id="homePtrIndicator"><i class="bi bi-arrow-repeat"></i></div>
+  <div id="homeFeed"></div>
+  <div id="loadMoreSpinner" class="st-loader-row"><div class="st-loader"></div><span>Loading more videos...</span></div>
+</main>
+
+<!-- INBOX — TikTok-style layout: three compact category rows up top
+     (Activity, New followers, ShortTube Team), each opening its own
+     full-screen list/chat. The page body below them is just the plain
+     conversation list, like any normal chat app inbox. -->
+<div id="inboxPage" class="page">
+  <div class="inbox-page-header"><h3>Inbox</h3></div>
+
+  <div class="inbox-category-list">
+    <button class="inbox-cat-row" id="inboxActivityRow" type="button">
+      <div class="inbox-cat-icon activity"><i class="bi bi-heart-fill"></i></div>
+      <div class="inbox-cat-body">
+        <div class="inbox-cat-title">Activity</div>
+        <div class="inbox-cat-sub" id="inboxActivityPreview">Likes and comments on your videos</div>
+      </div>
+      <span class="inbox-cat-badge" id="inboxActivityBadge" style="display:none;">0</span>
+    </button>
+    <button class="inbox-cat-row" id="inboxFollowersRow" type="button">
+      <div class="inbox-cat-icon followers"><i class="bi bi-people-fill"></i></div>
+      <div class="inbox-cat-body">
+        <div class="inbox-cat-title">New followers</div>
+        <div class="inbox-cat-sub" id="inboxFollowersPreview">See who's following you</div>
+      </div>
+      <span class="inbox-cat-badge" id="inboxFollowersBadge" style="display:none;">0</span>
+    </button>
+    <button class="inbox-cat-row" id="inboxSupportRow" type="button">
+      <div class="inbox-cat-icon support"><i class="bi bi-headset"></i></div>
+      <div class="inbox-cat-body">
+        <div class="inbox-cat-title">ShortTube Team</div>
+        <div class="inbox-cat-sub">Chat with our support team</div>
+      </div>
+      <i class="bi bi-chevron-right inbox-cat-chevron"></i>
+    </button>
+  </div>
+
+  <div id="inboxMessagesSection" class="inbox-section">
+    <div id="inboxMessagesList"><div class="empty-state"><i class="bi bi-chat-dots"></i>Log in to see your messages.</div></div>
+  </div>
+</div>
+
+<!-- ACTIVITY (Likes & Comments) — full-screen list opened from the row above. -->
+<div id="inboxActivityOverlay" class="static-overlay">
+  <div class="static-topbar"><button class="static-close" data-close="inboxActivityOverlay"><i class="bi bi-arrow-left"></i></button><h3>Activity</h3></div>
+  <div class="static-body" style="padding:4px 14px 16px;">
+    <div id="inboxActivityList"><div class="empty-state"><i class="bi bi-bell"></i>Log in to see likes and comments on your videos.</div></div>
+  </div>
+</div>
+
+<!-- FOLLOWERS — full-screen list opened from the row above. -->
+<div id="inboxFollowersOverlay" class="static-overlay">
+  <div class="static-topbar"><button class="static-close" data-close="inboxFollowersOverlay"><i class="bi bi-arrow-left"></i></button><h3>Followers</h3></div>
+  <div class="static-body" style="padding:4px 14px 16px;">
+    <div id="inboxFollowersList"><div class="empty-state"><i class="bi bi-people"></i>Log in to see your followers.</div></div>
+  </div>
+</div>
+
+<!-- SHORTTUBE TEAM (support chat) — full-screen chat, opened from the row
+     above or from Settings. Same fixed-input-at-bottom convention as the
+     DM thread overlay. -->
+<div id="inboxSupportOverlay" class="static-overlay">
+  <div class="static-topbar"><button class="static-close" data-close="inboxSupportOverlay"><i class="bi bi-arrow-left"></i></button><h3>ShortTube Team</h3></div>
+  <div class="static-body">
+    <div class="support-chat">
+      <div class="support-chat-log" id="supportChatLog">
+        <div class="support-msg them">Hi! 👋 This is the ShortTube Support Team. How can we help you today?</div>
+      </div>
+      <div class="support-chat-input">
+        <input type="text" id="supportChatInput" placeholder="Type a message...">
+        <button id="supportChatSend" class="primary-btn" style="width:auto; margin-top:0; padding:9px 16px;">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DM THREAD — full-screen conversation view, opened from a row in the
+     Inbox "Messages" section or from a person's profile "Message" button
+     (starting a NEW conversation only ever happens from their profile —
+     there's no separate "New Message" picker anymore). Uses the same
+     static-overlay back-button convention as every other full page here. -->
+<div id="dmThreadOverlay">
+  <div class="static-topbar">
+    <button class="static-close" id="closeDmThread"><i class="bi bi-arrow-left"></i></button>
+    <div class="dm-title"><div class="avatar-dot" id="dmThreadAvatar" style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--red),var(--gold));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:.78rem;flex-shrink:0;"></div><span id="dmThreadName">Conversation</span></div>
+  </div>
+  <div id="dmThreadBody"></div>
+  <div id="dmThreadInputRow">
+    <input type="text" id="dmThreadInput" placeholder="Message...">
+    <button id="dmThreadSend">Send</button>
+  </div>
+</div>
+
+<!-- PROFILE — matches Facebook's profile layout up through the stats line:
+     banner, a circular avatar overlapping it, the display name, then one
+     compact "X followers · Y following · Z posts" line. Nothing else from
+     Facebook's chrome (Dashboard/Create, tabs, Personal details, etc.) is
+     replicated — right below the stats line is straight into this user's
+     post feed. -->
+<div id="profilePage" class="page">
+  <div class="profile-banner-wrap" id="profileBannerWrap">
+    <img id="profileBannerImg" alt="Profile banner">
+    <div class="profile-topbar">
+      <span></span>
+      <button id="profileMenuBtn" class="settings-gear-btn" aria-label="More options"><i class="bi bi-three-dots-vertical"></i></button>
+    </div>
+  </div>
+
+  <div class="fb-profile-header">
+    <div class="fb-avatar-wrap">
+      <img id="profileAvatarImg" class="fb-avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 74 74'%3E%3Crect width='74' height='74' rx='18' fill='%23EEF1F5'/%3E%3Ccircle cx='37' cy='29' r='13' fill='%23AEB6C4'/%3E%3Cpath d='M14 63c2-14 13-21 23-21s21 7 23 21' fill='%23AEB6C4'/%3E%3C/svg%3E" alt="Profile picture">
+    </div>
+    <div class="fb-name-block">
+      <h2 id="profileDisplayName">Guest</h2>
+      <div class="fb-stats-line">
+        <button type="button" id="profileFollowersCol"><span id="statFollowersVal">0</span> followers</button>
+        <span class="fb-stats-dot">&middot;</span>
+        <span><span id="statFollowingVal">0</span> following</span>
+        <span class="fb-stats-dot">&middot;</span>
+        <span><span id="statPostsVal">0</span> posts</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bio is kept off-screen as data storage only (Edit Profile reads/writes
+       it) — not part of the on-page Facebook-style design. -->
+  <p class="profile-bio" id="profileBioText" style="display:none;"></p>
+
+  <div class="fb-action-row">
+    <button id="editProfileBtn" class="pill-btn-outline" style="display:none;"><i class="bi bi-pencil-square" style="margin-right:5px;"></i>Edit Profile</button>
+    <button id="loginOpenBtn" class="pill-btn-outline" style="display:none;">Log In / Sign Up</button>
+    <!-- Upload lives ONLY here now (Profile), never in the bottom nav or
+         anywhere else — visible exclusively once a real channel exists
+         (see refreshAuthUI() in app.js). -->
+    <button id="uploadOpenBtn" class="primary-btn" style="display:none; width:auto; margin-top:0; padding:8px 18px;"><i class="bi bi-plus-circle-fill" style="margin-right:6px;"></i>Upload</button>
+    <button id="followBtn" class="primary-btn" style="display:none; width:auto; margin-top:0; padding:8px 18px;">Follow</button>
+    <button id="messageProfileBtn" class="pill-btn-outline" style="display:none;"><i class="bi bi-chat-dots"></i></button>
+  </div>
+
+  <!-- Post feed: this user's uploads in chronological (newest-first) order,
+       mixing photos and videos exactly as they were posted — a single
+       vertical feed, Facebook-profile style, not a grid. -->
+  <div id="profileFeedGrid" class="profile-feed-list"></div>
+</div>
+
+
+<!-- PROFILE 3-DOT MENU — Studio + Settings/policies live here now, off the bottom nav -->
+<div id="profileMenuOverlay" class="static-overlay">
+  <div class="static-topbar"><button class="static-close" data-close="profileMenuOverlay"><i class="bi bi-arrow-left"></i></button><h3>Menu</h3></div>
+  <div class="menu-box-grid">
+    <div class="menu-box" id="studioMenuRow"><i class="bi bi-bar-chart-fill"></i><span>Studio</span></div>
+    <div class="menu-box" id="settingsMenuRow"><i class="bi bi-gear-fill"></i><span>Settings</span></div>
+  </div>
+</div>
+
+<!-- SETTINGS OVERLAY — gear icon on Profile. Holds all policy links + prefs + logout.
+     Every row is a large white "box", not a thin list row. -->
+<div id="settingsOverlay" class="static-overlay">
+  <div class="static-topbar"><button class="static-close" data-close="settingsOverlay"><i class="bi bi-arrow-left"></i></button><h3>Settings</h3></div>
+  <div style="padding:12px 16px;">
+    <button class="settings-box" id="supportTeamRow"><span class="sb-left"><i class="bi bi-headset"></i>Support Team</span><i class="bi bi-chevron-right"></i></button>
+    <button class="settings-box" id="themeRow"><span class="sb-left"><i class="bi bi-palette-fill"></i>Theme</span><span class="sb-right"><span id="themeRowValue">Pure White</span><i class="bi bi-chevron-right"></i></span></button>
+    <button class="settings-box" id="tosRow"><span class="sb-left"><i class="bi bi-file-earmark-check"></i>Terms of Service</span><i class="bi bi-chevron-right"></i></button>
+    <button class="settings-box" id="privacyRow"><span class="sb-left"><i class="bi bi-shield-check"></i>Privacy Policy</span><i class="bi bi-chevron-right"></i></button>
+    <button class="settings-box" id="legalRow"><span class="sb-left"><i class="bi bi-file-earmark-text"></i>Legal, DMCA &amp; Community Guidelines</span><i class="bi bi-chevron-right"></i></button>
+    <button class="settings-box" id="aboutRow"><span class="sb-left"><i class="bi bi-info-circle"></i>About ShortTube</span><i class="bi bi-chevron-right"></i></button>
+    <button class="settings-box" id="logoutRow" style="display:none;"><span class="sb-left"><i class="bi bi-box-arrow-right"></i>Log Out</span><i class="bi bi-chevron-right"></i></button>
+  </div>
+</div>
+
+<!-- STATIC PAGES: Terms of Service / Privacy / About / Legal -->
+<div id="tosOverlay" class="static-overlay">
+  <div class="static-topbar"><button class="static-close" data-close="tosOverlay"><i class="bi bi-arrow-left"></i></button><h3>Terms of Service</h3></div>
+  <div class="static-body">
+    <h4>1. Acceptance of Terms</h4>
+    <p>By creating an account or otherwise using ShortTube, you agree to be bound by these Terms of Service. If you do not agree, please do not use the app.</p>
+    <h4>2. Eligibility &amp; Age Requirement</h4>
+    <p>ShortTube is intended for users aged 13 and older, or 18 and older in jurisdictions where a higher minimum age applies. By using ShortTube, you confirm that you meet this age requirement. We do not knowingly permit accounts belonging to users younger than the applicable minimum age, and any such account may be suspended or terminated.</p>
+    <h4>3. Your Account</h4>
+    <p>You're responsible for the activity on your account and for keeping your login access secure. You may delete your account at any time from your Profile settings, which permanently removes your profile and the content associated with it.</p>
+    <h4>4. User-Uploaded Content</h4>
+    <p>By uploading a video, you confirm that you own the rights to it or have permission to share it, and you grant ShortTube a license to host, store, and display it within the app. You retain ownership of your content and may remove it at any time. You are solely responsible for the content you upload.</p>
+    <h4>5. Third-Party Content &amp; YouTube API Services</h4>
+    <p>ShortTube displays publicly available videos from YouTube alongside user uploads. Use of YouTube content is governed by the YouTube API Services and requires you to also agree to the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener" style="color:var(--red-glow);">YouTube Terms of Service</a> and the <a href="https://policies.google.com/privacy" target="_blank" rel="noopener" style="color:var(--red-glow);">Google Privacy Policy</a>, both also linked in the Legal &amp; Policies section. Third-party content is streamed directly from YouTube and remains the property of its original owners; ShortTube does not download, re-host, or modify it.</p>
+    <h4>6. Prohibited Conduct</h4>
+    <p>You may not use ShortTube to upload or share unlawful, hateful, harassing, sexually exploitative, or violent content, to infringe others' intellectual property, to impersonate others, or to interfere with the app's normal operation. Violations may result in content removal and/or account suspension.</p>
+    <h4>7. Copyright &amp; DMCA</h4>
+    <p>ShortTube responds to valid copyright takedown notices. If you believe content on ShortTube infringes your copyright, contact <a href="mailto:dmca@shorttube.app" style="color:var(--red-glow);">dmca@shorttube.app</a> with a description of the work, its location within the app, and a statement of good-faith belief that use is unauthorized. See the Legal &amp; Policies section for full DMCA procedure details.</p>
+    <h4>8. Termination</h4>
+    <p>We may suspend or terminate accounts that violate these Terms, engage in illegal activity, or pose a risk to other users. You may also close your account at any time.</p>
+    <h4>9. Disclaimers</h4>
+    <p>ShortTube is provided "as is" without warranties of any kind. We do not guarantee uninterrupted or error-free operation, and we are not responsible for the accuracy or legality of third-party content displayed in the app.</p>
+    <h4>10. Limitation of Liability</h4>
+    <p>To the fullest extent permitted by law, ShortTube and its operators are not liable for indirect, incidental, or consequential damages arising from your use of the app.</p>
+    <h4>11. Changes to These Terms</h4>
+    <p>We may update these Terms from time to time. Continued use of ShortTube after changes take effect constitutes acceptance of the revised Terms.</p>
+    <h4>12. Contact</h4>
+    <p>Questions about these Terms can be sent through Inbox → Chat with Support Team, or to <a href="mailto:dmca@shorttube.app" style="color:var(--red-glow);">dmca@shorttube.app</a> for copyright-specific matters.</p>
+  </div>
+</div>
+
+<div id="privacyOverlay" class="static-overlay">
+  <div class="static-topbar"><button class="static-close" data-close="privacyOverlay"><i class="bi bi-arrow-left"></i></button><h3>Privacy Policy</h3></div>
+  <div class="static-body">
+    <h4>What we collect</h4>
+    <p>When you create a ShortTube account we store your email or phone number, display name, and any profile photo you upload. If you upload videos, we store the video file, thumbnail, title, and description you provide.</p>
+    <h4>How we use it</h4>
+    <p>Your data is used to run your account, show your uploads to other users, and personalize your Home feed based on watch behavior. We never sell your personal data to third parties.</p>
+    <h4>Third-party video sources</h4>
+    <p>Videos shown from YouTube are streamed directly from YouTube and are subject to the <a href="https://policies.google.com/privacy" target="_blank" rel="noopener" style="color:var(--red-glow);">Google Privacy Policy</a>.</p>
+    <h4>Your choices</h4>
+    <p>You can edit or delete your profile, and delete any video you've uploaded, at any time from your Profile page. You can browse ShortTube as a guest without creating an account.</p>
+    <h4>Age Requirement</h4>
+    <p>ShortTube is intended for users aged 13 and older, or 18 and older where local law requires a higher minimum age. By creating an account, you confirm that you meet this age requirement.</p>
+    <h4>Account Deletion</h4>
+    <p>Deleting your account permanently removes your profile information and account data from ShortTube's servers, along with any videos you've uploaded. This action cannot be undone.</p>
+    <h4>Contact</h4>
+    <p>Questions about this policy can be sent through the Inbox → Chat with Support Team.</p>
+  </div>
+</div>
+
+<div id="aboutOverlay" class="static-overlay">
+  <div class="static-topbar"><button class="static-close" data-close="aboutOverlay"><i class="bi bi-arrow-left"></i></button><h3>About ShortTube</h3></div>
+  <div class="static-body">
+    <h4>What is ShortTube?</h4>
+    <p>ShortTube is a mobile media-sharing app with a photo feed and a YouTube-style long-form video feed, mixing your own community's uploads together with public videos from YouTube.</p>
+    <h4>Why we built it</h4>
+    <p>To give independent creators a simple place to publish both quick clips and longer videos side-by-side with the wider video world, without needing their own audience first.</p>
+    <h4>Version</h4>
+    <p>ShortTube Web — built with Appwrite (auth, database, storage) and vanilla JS.</p>
+  </div>
+</div>
+
+<div id="legalOverlay" class="static-overlay">
+  <div class="static-topbar"><button class="static-close" data-close="legalOverlay"><i class="bi bi-arrow-left"></i></button><h3>Legal &amp; Policies</h3></div>
+  <div class="static-body">
+    <h4>YouTube API Services</h4>
+    <p>ShortTube uses the YouTube API Services to display publicly available YouTube videos. By using ShortTube you also agree to the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener" style="color:var(--red-glow);">YouTube Terms of Service</a>. YouTube content is displayed for viewing only and is not re-hosted, downloaded, or modified by ShortTube.</p>
+    <h4>Google Privacy Policy</h4>
+    <p>Data handled through the YouTube API is also subject to the <a href="https://policies.google.com/privacy" target="_blank" rel="noopener" style="color:var(--red-glow);">Google Privacy Policy</a>.</p>
+    <h4>User-uploaded content</h4>
+    <p>By uploading a video to ShortTube, you confirm you own the rights to it or have permission to share it, and you grant ShortTube a license to host and display it within the app. You may delete your own uploads at any time.</p>
+    <h4>Community guidelines</h4>
+    <p>No hate speech, harassment, sexual content involving minors, or content that violates the law. Reports can be filed via Inbox → Chat with Support Team.</p>
+    <h4>Ads</h4>
+    <p>ShortTube shows periodic ad cards in the Videos feed to support the platform.</p>
+    <h4>Disclaimer</h4>
+    <p>ShortTube is an independent product and is not affiliated with, sponsored by, or endorsed by YouTube or Google LLC. All trademarks, logos, and brand names referenced belong to their respective owners.</p>
+    <h4>DMCA Notice</h4>
+    <p>If you believe content available on ShortTube infringes your copyright, send a takedown notice to <a href="mailto:dmca@shorttube.app" style="color:var(--red-glow);">dmca@shorttube.app</a> including a description of the copyrighted work, the URL or in-app location of the material, and a statement that you own the rights or are authorized to act on the owner's behalf. Verified requests will be actioned promptly and the associated content removed.</p>
+    <h4>Age Requirement</h4>
+    <p>ShortTube is intended for users aged 13 and older. By creating an account or using the app, you confirm that you are at least 13 years old. Accounts found to belong to users under this age may be suspended.</p>
+    <h4>Data Privacy — Local Storage</h4>
+    <p>ShortTube stores a small amount of data locally on your device (such as your theme choice) using browser local storage. This local data is never transmitted to third parties and can be cleared at any time by clearing your browser's site data. See our Privacy Policy for details on account data stored on our servers.</p>
+  </div>
+</div>
+
+<!-- LOGIN / SIGN UP MODAL — one-tap Google sign-in, no manual credentials -->
+<div id="loginModal" class="modal-overlay">
+  <div class="modal-sheet">
+    <div class="modal-header"><h3 id="authModalTitle">Log In</h3><button class="modal-close" onclick="document.getElementById('loginModal').classList.remove('active')">&times;</button></div>
+    <div class="modal-body">
+
+      <!-- GOOGLE OAUTH PANEL (sole login method) — hands the whole flow off to
+           Google via Appwrite's OAuth2 session; nothing to type here. -->
+      <div id="authPanelGoogle" class="auth-panel active">
+        <p id="authModalSubtext" style="font-size:.82rem; color:var(--muted); margin:0 0 16px;">Sign in instantly with your Google account. No forms, no passwords.</p>
+
+        <!-- AGE CONFIRMATION — shown once per device before the first sign-up/login.
+             This is a self-attested checkbox (not government-ID verification,
+             and no date of birth is collected). Confirmation is recorded on
+             the account as soon as the Google sign-in completes. -->
+        <div id="ageGateRow">
+          <label style="display:flex; align-items:flex-start; gap:8px; font-size:.78rem; color:var(--muted); margin-top:2px; cursor:pointer;">
+            <input type="checkbox" id="authAgeCheck" style="margin-top:3px;">
+            <span>I confirm that I meet ShortTube's minimum age requirement (13 years or older, or 18+ where required by local law).</span>
+          </label>
+          <div id="authAgeError" style="color:#FF5252; font-size:.75rem; margin-top:6px; display:none;">Please confirm you meet the minimum age requirement to continue.</div>
+        </div>
+
+        <button id="googleLoginBtn" class="primary-btn"><i class="bi bi-google" style="margin-right:8px;"></i><span id="googleLoginBtnLabel">Continue with Google</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT PROFILE MODAL -->
+<div id="editProfileModal" class="modal-overlay">
+  <div class="modal-sheet">
+    <div class="modal-header"><h3>Edit Profile</h3><button class="modal-close" onclick="document.getElementById('editProfileModal').classList.remove('active')">&times;</button></div>
+    <div class="modal-body">
+      <div class="banner-edit-row" id="editBannerRow">
+        <img id="editBannerPreview" alt="Banner preview">
+        <label class="pill-btn-outline banner-edit-btn">Change Banner<input type="file" id="editBannerInput" accept="image/*" hidden></label>
+      </div>
+      <div class="avatar-edit-row">
+        <img id="editAvatarPreview" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 74 74'%3E%3Crect width='74' height='74' rx='18' fill='%23EEF1F5'/%3E%3Ccircle cx='37' cy='29' r='13' fill='%23AEB6C4'/%3E%3Cpath d='M14 63c2-14 13-21 23-21s21 7 23 21' fill='%23AEB6C4'/%3E%3C/svg%3E" alt="Avatar preview">
+        <label class="pill-btn-outline">Change Photo<input type="file" id="editAvatarInput" accept="image/*" hidden></label>
+      </div>
+      <label class="field-label">Display Name</label>
+      <input type="text" id="editNameInput" class="text-field" placeholder="Your name" autocomplete="off">
+      <div class="name-check-row" id="nameCheckRow"></div>
+      <label class="field-label">Bio</label>
+      <textarea id="editBioInput" class="field-textarea" rows="3" maxlength="150" placeholder="Tell people about yourself..."></textarea>
+      <button id="saveProfileBtn" class="primary-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- THEME MODAL — Settings > Theme. Lets the user switch the app's dark
+     background preset. Choice is saved to localStorage and re-applied on
+     every load via applyTheme() near the DOMContentLoaded init block. -->
+<div id="themeModal" class="modal-overlay">
+  <div class="modal-sheet">
+    <div class="modal-header"><h3>Theme</h3><button class="modal-close" onclick="document.getElementById('themeModal').classList.remove('active')">&times;</button></div>
+    <div class="modal-body">
+      <button class="theme-option" data-theme-value="pure-white">
+        <span class="theme-swatch" style="background:linear-gradient(160deg,#FFFFFF,#FCFDFE,#F7F9FC); border:1px solid rgba(0,0,0,.12);"></span>
+        <span class="theme-option-label">Pure White<small>Default — clean white with a soft blue glow</small></span>
+        <i class="bi bi-check-circle-fill theme-check"></i>
+      </button>
+      <button class="theme-option" data-theme-value="soft-ivory">
+        <span class="theme-swatch" style="background:linear-gradient(160deg,#FFFDF8,#FDFAF2,#FAF6EE); border:1px solid rgba(0,0,0,.12);"></span>
+        <span class="theme-option-label">Soft Ivory<small>Warm off-white surface</small></span>
+        <i class="bi bi-check-circle-fill theme-check"></i>
+      </button>
+      <button class="theme-option" data-theme-value="cool-grey">
+        <span class="theme-swatch" style="background:linear-gradient(160deg,#F8FAFC,#F5F8FB,#F0F3F7); border:1px solid rgba(0,0,0,.12);"></span>
+        <span class="theme-option-label">Cool Grey<small>Crisp, neutral light-grey surface</small></span>
+        <i class="bi bi-check-circle-fill theme-check"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- QUICK COMMENT SHEET — opened by the "Comment" action button on any
+     feed card (image or video) without leaving the feed. Reuses the same
+     ShortTubeSocial comment storage as the full player's comment section. -->
+<div id="sheetBackdrop"></div>
+<div id="commentSheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header"><h4 style="margin:0; font-size:.9rem;">Comments</h4><button class="modal-close" id="closeCommentSheet">&times;</button></div>
+  <div class="sheet-body" id="commentSheetList"></div>
+  <div class="sheet-footer comment-input-row">
+    <input type="text" id="commentSheetInput" placeholder="Add a comment...">
+    <button id="commentSheetPost">Post</button>
+  </div>
+</div>
+
+<!-- LONG-FORM PLAYER OVERLAY — the sticky-top block (back button + video frame +
+     like/comment/share actions) never scrolls; only player-scroll-body scrolls,
+     so the video stays put while browsing "Up next" / comments. -->
+<div id="playerOverlay">
+  <div class="player-sticky-top">
+    <div class="player-topbar"><button id="closePlayer"><i class="bi bi-arrow-left"></i></button></div>
+    <div class="player-frame" id="playerFrame"></div>
+    <div class="player-actions" style="padding:12px 14px 0;">
+      <button class="pill-btn" id="playerLikeBtn"><i class="bi bi-heart-fill"></i> <span id="playerLikeCount">Like</span></button>
+      <button class="pill-btn" id="playerFollowBtn"><i class="bi bi-person-plus"></i> <span id="playerFollowLabel">Follow</span></button>
+      <button class="pill-btn" id="playerCommentBtn"><i class="bi bi-chat-fill"></i> Comment</button>
+      <button class="pill-btn" id="playerShareBtn"><i class="bi bi-share-fill"></i> Share</button>
+      <button class="pill-btn" id="playerReportBtn"><i class="bi bi-flag-fill"></i> Report</button>
+    </div>
+  </div>
+  <div class="player-scroll-body">
+    <div class="player-info" style="padding-top:10px;">
+      <h2 id="playerTitle"></h2>
+      <div class="channel" id="playerChannel"></div>
+    </div>
+    <div class="comments-section" id="playerCommentsSection">
+      <h4>Comments</h4>
+      <div class="comment-input-row"><input type="text" id="playerCommentInput" placeholder="Add a comment..."><button id="playerCommentPost">Post</button></div>
+      <div id="playerCommentList"></div>
+    </div>
+    <div class="playlist-section"><h4>Up next</h4><div id="playlistList"></div></div>
+  </div>
+</div>
+
+
+<!-- REPORT MODAL — long-form player -->
+<div id="reportModal" class="modal-overlay">
+  <div class="modal-sheet">
+    <div class="modal-header"><h3>Report Video</h3><button class="modal-close" onclick="document.getElementById('reportModal').classList.remove('active')">&times;</button></div>
+    <div class="modal-body">
+      <p style="font-size:.8rem; color:var(--muted); margin:0 0 12px;">Reports are reviewed to keep ShortTube free of violence, sexual content, and unauthorized re-uploads.</p>
+      <button class="settings-row report-reason-btn" data-reason="violence"><span><i class="bi bi-exclamation-triangle"></i>Violence or dangerous acts</span><i class="bi bi-chevron-right"></i></button>
+      <button class="settings-row report-reason-btn" data-reason="sexual_content"><span><i class="bi bi-shield-x"></i>Sexual content</span><i class="bi bi-chevron-right"></i></button>
+      <button class="settings-row report-reason-btn" data-reason="unauthorized_reupload"><span><i class="bi bi-copy"></i>Unauthorized re-upload / copyright</span><i class="bi bi-chevron-right"></i></button>
+      <button class="settings-row report-reason-btn" data-reason="spam"><span><i class="bi bi-slash-circle"></i>Spam or misleading</span><i class="bi bi-chevron-right"></i></button>
+      <button class="settings-row report-reason-btn" data-reason="other"><span><i class="bi bi-three-dots"></i>Other</span><i class="bi bi-chevron-right"></i></button>
+    </div>
+  </div>
+</div>
+
+<!-- UPLOAD CHOOSER — triggered from the bottom-nav '+' button. Camera-style
+     picker with two options; picking one opens the device's native camera /
+     gallery chooser filtered to that media type. -->
+<div id="uploadChooserModal" class="modal-overlay">
+  <div class="modal-sheet">
+    <div class="modal-header"><h3>New Post</h3><button class="modal-close" onclick="document.getElementById('uploadChooserModal').classList.remove('active')">&times;</button></div>
+    <div class="modal-body" style="padding-top:4px;">
+      <button class="settings-row" id="chooseLongVideoBtn" style="width:100%; background:none; border:none; border-bottom:1px solid var(--border); color:var(--text); text-align:left; cursor:pointer;">
+        <span><i class="bi bi-camera-reels-fill"></i>Long Video</span><i class="bi bi-chevron-right"></i>
+      </button>
+      <button class="settings-row" id="choosePhotoBtn" style="width:100%; background:none; border:none; color:var(--text); text-align:left; cursor:pointer;">
+        <span><i class="bi bi-image-fill"></i>Photo</span><i class="bi bi-chevron-right"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- UPLOAD FORM (Title/Description step, shown after a file is picked from
+     the chooser above) — accepts either a video or a photo; upload.js
+     detects which was picked. -->
+<input type="file" id="uploadFileInput" accept="video/*,image/*" hidden>
+<div id="uploadFormModal" class="modal-overlay">
+  <div class="modal-sheet">
+    <div class="modal-header"><h3 id="uploadModalTitle">Upload Video</h3><button class="modal-close" onclick="document.getElementById('uploadFormModal').classList.remove('active')">&times;</button></div>
+    <div class="modal-body">
+      <img id="uploadThumbnailPreview" class="thumb-preview" alt="Thumbnail preview">
+      <label class="field-label">Title</label>
+      <input type="text" id="uploadTitleInput" class="text-field" placeholder="Give it a title">
+      <label class="field-label">Description</label>
+      <textarea id="uploadDescInput" class="text-field" rows="3" placeholder="What's this about?"></textarea>
+      <div class="upload-progress-track"><div id="uploadProgressBar" class="upload-progress-fill"></div></div>
+      <button id="uploadSubmitBtn" class="primary-btn">Publish</button>
+    </div>
+  </div>
+</div>
+
+<!-- STUDIO — moved off the bottom nav; opened from Profile's 3-dot menu -->
+<div id="studioOverlay" class="static-overlay">
+  <div class="static-topbar"><button class="static-close" data-close="studioOverlay"><i class="bi bi-arrow-left"></i></button><h3>Studio</h3></div>
+  <div class="static-body" style="padding:16px;">
+    <p class="studio-sub">Your channel performance at a glance</p>
+    <div id="studioLoggedOut" class="empty-state" style="display:none;">
+      <i class="bi bi-bar-chart"></i>Log in to see your Studio analytics.
+    </div>
+    <div id="studioContent" style="display:none;">
+      <div class="studio-stat-grid">
+        <div class="stat-box"><div class="num" id="studioViewsVal">0</div><div class="lbl">Views</div></div>
+        <div class="stat-box"><div class="num" id="studioLikesVal">0</div><div class="lbl">Likes</div></div>
+        <div class="stat-box"><div class="num" id="studioCommentsVal">0</div><div class="lbl">Comments</div></div>
+        <div class="stat-box"><div class="num" id="studioFollowersVal">0</div><div class="lbl">Followers</div></div>
+      </div>
+      <h4 class="studio-section-title">Your videos</h4>
+      <div id="studioVideoList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- STUDIO VIDEO DETAIL — opened by tapping a video in the Studio list -->
+<div id="studioDetailOverlay" class="static-overlay">
+  <div class="static-topbar"><button class="static-close" data-close="studioDetailOverlay"><i class="bi bi-arrow-left"></i></button><h3>Video Analytics</h3></div>
+  <div class="static-body" id="studioDetailBody"></div>
+</div>
+
+<nav class="bottom-nav">
+  <button class="nav-btn active" data-page="imagesPage" data-tab="home"><i class="bi bi-image-fill"></i><span class="tab-label">Home</span></button>
+  <button class="nav-btn" data-page="homePage" data-tab="videos"><i class="bi bi-camera-reels-fill"></i><span class="tab-label">Videos</span></button>
+  <button class="nav-btn" data-page="inboxPage" data-tab="inbox" aria-label="Inbox"><i class="bi bi-chat-heart-fill"></i><span id="inboxUnreadDot" class="unread-dot"></span><span class="tab-label">Inbox</span></button>
+  <button class="nav-btn" data-page="profilePage" data-tab="profile" aria-label="Profile"><i class="bi bi-person-fill"></i><span class="tab-label">Profile</span></button>
+</nav>
+
+<!-- ===================== SCRIPTS (order matters) =====================
+     `defer` on every local script lets the browser parse/paint the page
+     (and start fetching these files in parallel) instead of blocking on
+     each <script> in turn — a real win on slow 2G/3G links — while still
+     guaranteeing they execute in this exact order right after parsing,
+     so the inter-file dependencies below stay intact. -->
+<script src="https://cdn.jsdelivr.net/npm/appwrite@16.0.2" defer></script>
+<script src="js/appwrite-config.js" defer></script>
+<script src="js/auth.js" defer></script>
+<!-- Google Identity Services — powers the automatic "device account detected"
+     One Tap prompt in js/google-onetap.js. Loaded non-deferred/async per
+     Google's own recommendation so it's ready as early as possible. -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="js/google-onetap.js" defer></script>
+<script src="js/profile.js" defer></script>
+<script src="js/upload.js" defer></script>
+<script src="js/algorithm.js" defer></script>
+<script src="js/ads-unity.js" defer></script>
+<script src="js/social.js" defer></script>
+<script src="js/messaging.js" defer></script>
+<script src="js/video-api.js" defer></script>
+<script src="js/feed.js" defer></script>
+<script src="js/player-enhancements.js" defer></script>
+<script src="js/pwa-register.js" defer></script>
+
+<script src="js/app.js" defer></script>
+</body>
+</html>
